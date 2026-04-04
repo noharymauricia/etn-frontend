@@ -1,21 +1,23 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import NProgress from "nprogress";
 
 // Declenche la barre de progression lors des changements de route.
 export default function TopLoader() {
   const pathname = usePathname();
+  const hasMountedRef = useRef(false);
 
   useEffect(() => {
-    NProgress.start();
-
-    const timeout = setTimeout(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
       NProgress.done();
-    }, 500);
+      return;
+    }
 
-    return () => clearTimeout(timeout);
+    NProgress.start();
+    NProgress.done();
   }, [pathname]);
 
   return null;

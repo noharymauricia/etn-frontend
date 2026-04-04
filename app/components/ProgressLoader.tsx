@@ -27,7 +27,7 @@ export default function ProgressLoader() {
         alt="Logo"
         width={192}
         height={192}
-        className="mb-6 h-48 w-48"
+        className="mb-6 h-48 w-auto"
       />
 
       <p className="mb-4 text-xl text-gray-700">

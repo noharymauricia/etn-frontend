@@ -1,12 +1,18 @@
 "use client";
 
+import { useState } from "react";
+
 import PageShell from "@/components/layout/PageShell";
+import AppCombobox from "@/components/ui/AppCombobox";
 import Button from "@/components/ui/Button";
 
 const fieldClassName =
   "w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/60 focus:border-white/60"
 
 export default function Home() {
+  const [status, setStatus] = useState("En cours");
+  const [responsable, setResponsable] = useState("Marie");
+
   return (
     <PageShell title="Fiche activite" maxWidth="max-w-4xl">
       <div className="grid gap-4 md:grid-cols-2">
@@ -16,18 +22,30 @@ export default function Home() {
         </div>
         <div>
           <label className="mb-2 block text-sm font-semibold text-white">Statut</label>
-          <select className={fieldClassName}>
-            <option className="text-black">En cours</option>
-            <option className="text-black">Planifier</option>
-            <option className="text-black">Terminer</option>
-          </select>
+          <AppCombobox
+            value={status}
+            options={[
+              { label: "En cours", value: "En cours" },
+              { label: "Planifier", value: "Planifier" },
+              { label: "Terminer", value: "Terminer" },
+            ]}
+            placeholder="Choisir un statut"
+            ariaLabel="Statut"
+            onChange={setStatus}
+          />
         </div>
         <div>
           <label className="mb-2 block text-sm font-semibold text-white">Responsable</label>
-          <select className={fieldClassName}>
-            <option className="text-black">Marie</option>
-            <option className="text-black">Nohary</option>
-          </select>
+          <AppCombobox
+            value={responsable}
+            options={[
+              { label: "Marie", value: "Marie" },
+              { label: "Nohary", value: "Nohary" },
+            ]}
+            placeholder="Choisir un responsable"
+            ariaLabel="Responsable"
+            onChange={setResponsable}
+          />
         </div>
         <div>
           <label className="mb-2 block text-sm font-semibold text-white">Participants</label>
