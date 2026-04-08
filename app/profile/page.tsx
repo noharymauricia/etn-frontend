@@ -9,7 +9,7 @@ import AppScrollArea from "@/components/ui/AppScrollArea";
 import Button from "@/components/ui/Button";
 import { toast } from "@/components/ui/Toasts";
 import { authService, clearAuthSession, getStoredToken, persistAuthSession } from "@/services/auth.services";
-import { utilisateurService, type Utilisateur } from "@/services/utilisateur.services";
+import { utilisateurService, type UpdateUtilisateurPayload, type Utilisateur } from "@/services/utilisateur.services";
 
 function formatImInput(value: string | null | undefined) {
   if (!value) {
@@ -55,12 +55,19 @@ function getDisplayRole(role?: string) {
   return role === "Simple utilisateur" ? "Utilisateur" : role;
 }
 
+function buildProfileUpdatePayload(payload: UpdateUtilisateurPayload) {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== ""),
+  ) as UpdateUtilisateurPayload;
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<Utilisateur | null>(null);
   const [activeProfileTab, setActiveProfileTab] = useState<"info" | "security">("info");
   const [currentAvatar, setCurrentAvatar] = useState<string>("/profile-default.svg");
-  const [profileImagePayload, setProfileImagePayload] = useState<string | null>(null);
+  const [pendingProfileImagePayload, setPendingProfileImagePayload] = useState<string | null>(null);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -74,6 +81,7 @@ export default function ProfilePage() {
     tel: "",
   });
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isLengthValid = newPassword.length >= 8 && newPassword.length <= 16;
@@ -94,7 +102,7 @@ export default function ProfilePage() {
       });
     }
     setCurrentAvatar(profil.image || "/profile-default.svg");
-    setProfileImagePayload(profil.image ?? null);
+    setPendingProfileImagePayload(null);
   };
 
   useEffect(() => {
@@ -112,13 +120,11 @@ export default function ProfilePage() {
       try {
         const profil = await authService.me();
         persistAuthSession({ token, profil });
-        const fullProfil = await utilisateurService.getById(profil.id);
-
         if (!isMounted) {
           return;
         }
 
-        applyUserToView(fullProfil);
+        applyUserToView(profil as Utilisateur);
       } catch {
         clearAuthSession();
         router.replace("/");
@@ -144,6 +150,10 @@ export default function ProfilePage() {
   }, [currentAvatar]);
 
   const openFilePicker = () => {
+    if (isSavingAvatar) {
+      return;
+    }
+
     fileInputRef.current?.click();
   };
 
@@ -159,21 +169,52 @@ export default function ProfilePage() {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.warning("L'image est trop lourde. Choisissez un fichier de moins de 5 Mo.");
+    if (file.size > 10 * 1024 * 1024) {
+      toast.warning("L'image est trop lourde. Choisissez un fichier de moins de 10 Mo.");
       return;
     }
 
-    if (currentAvatar.startsWith("blob:")) {
-      URL.revokeObjectURL(currentAvatar);
+    if (!currentUser) {
+      toast.error("Profil introuvable. Rechargez la page.");
+      event.target.value = "";
+      return;
     }
 
+    const previousAvatar = currentAvatar;
     const localUrl = URL.createObjectURL(file);
-    const fileAsBase64 = await toBase64(file);
-    setCurrentAvatar(localUrl);
-    setProfileImagePayload(fileAsBase64);
     event.target.value = "";
-    toast.success("La photo de profil a ete mise a jour.");
+
+    try {
+      const fileAsBase64 = await toCompressedDataUrl(file);
+      setCurrentAvatar(localUrl);
+      setPendingProfileImagePayload(fileAsBase64);
+      setIsSavingAvatar(true);
+
+      const updatedUser = await utilisateurService.update(currentUser.id, buildProfileUpdatePayload({
+        matricule: profileForm.im.replace(/\D/g, ""),
+        nom: profileForm.nom.trim(),
+        role: currentUser.role,
+        fonction: profileForm.fonction.trim(),
+        telephone: profileForm.tel.replace(/\D/g, "") || undefined,
+        image: fileAsBase64,
+      }));
+
+      applyUserToView(updatedUser, false);
+
+      const token = getStoredToken();
+      if (token) {
+        persistAuthSession({ token, profil: updatedUser });
+      }
+
+      toast.success("La photo de profil a ete enregistree.");
+    } catch (error) {
+      URL.revokeObjectURL(localUrl);
+      setCurrentAvatar(previousAvatar);
+      setPendingProfileImagePayload(null);
+      toast.error(utilisateurService.getErrorMessage(error, "Impossible d'enregistrer la photo de profil."));
+    } finally {
+      setIsSavingAvatar(false);
+    }
   };
 
   const handleProfileUpdate = async () => {
@@ -201,14 +242,14 @@ export default function ProfilePage() {
     }
 
     try {
-      const updatedUser = await utilisateurService.update(currentUser.id, {
+      const updatedUser = await utilisateurService.update(currentUser.id, buildProfileUpdatePayload({
         matricule: normalizedIm,
         nom: profileForm.nom.trim(),
         role: currentUser.role,
         fonction: profileForm.fonction.trim(),
         telephone: normalizedPhone || undefined,
-        image: profileImagePayload,
-      });
+        image: pendingProfileImagePayload,
+      }));
 
       applyUserToView(updatedUser);
 
@@ -250,15 +291,15 @@ export default function ProfilePage() {
     }
 
     try {
-      await utilisateurService.update(currentUser.id, {
+      await utilisateurService.update(currentUser.id, buildProfileUpdatePayload({
         matricule: profileForm.im.replace(/\D/g, ""),
         nom: profileForm.nom.trim(),
         role: currentUser.role,
         fonction: profileForm.fonction.trim(),
         telephone: profileForm.tel.replace(/\D/g, "") || undefined,
         mot_de_passe: newPassword,
-        image: profileImagePayload,
-      });
+        image: pendingProfileImagePayload,
+      }));
 
       setCurrentPassword("");
       setNewPassword("");
@@ -280,11 +321,41 @@ export default function ProfilePage() {
   const secondNameLine = remainingNameParts.join(" ");
 
   return (
-    <main className="flex min-h-screen flex-col bg-[linear-gradient(90deg,#0f4b86_0%,#1460ab_46%,#1460ab_74%,#1d6ab7_100%)] text-white">
+    <main className="flex h-screen flex-col text-white overflow-hidden">
       <Navbar />
 
-      <div className="flex flex-1">
-        <div className="flex min-h-full w-64 flex-col items-center bg-transparent px-4 py-5 text-white">
+      <div className="flex flex-1 overflow-hidden">
+        {/* Bouton toggle sidebar — mobile/tablette uniquement */}
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#75b82a] text-white shadow-xl transition-all hover:bg-[#68a625] active:scale-95 lg:hidden"
+          aria-label={sidebarOpen ? "Fermer le profil" : "Voir le profil"}
+        >
+          {sidebarOpen ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-6 w-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-6 w-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+            </svg>
+          )}
+        </button>
+
+        {/* Overlay backdrop pour sidebar mobile */}
+        {sidebarOpen ? (
+          <div
+            className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden animate-in fade-in duration-200"
+            onClick={() => setSidebarOpen(false)}
+          />
+        ) : null}
+
+        {/* Sidebar */}
+        <div className={`fixed inset-y-0 left-0 z-30 w-64 transform bg-[#0f4b86]/95 backdrop-blur-md transition-transform duration-300 lg:relative lg:translate-x-0 lg:bg-transparent lg:backdrop-blur-none ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}>
+          <div className="flex min-h-full flex-col items-center px-4 py-5 pt-20 text-white lg:pt-5">
           <div className="mb-6 flex w-full flex-col items-center">
             <div className="mb-5 h-[260px] w-[185px] overflow-hidden rounded-2xl border border-white/15 bg-white/10 shadow-lg">
               <Image
@@ -333,9 +404,10 @@ export default function ProfilePage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h12" />
             </svg>
           </button>
+          </div>
         </div>
 
-        <AppScrollArea className="flex-1 min-h-0" viewportClassName="px-8 py-6 md:px-10">
+        <AppScrollArea className="flex-1 min-h-0" viewportClassName="px-4 py-4 md:px-8 md:py-6 lg:px-10">
           <div className="animate-in fade-in duration-500">
             {currentUser?.role !== "Simple utilisateur" ? (
               <div className="mb-6 flex items-center justify-between">
@@ -351,8 +423,8 @@ export default function ProfilePage() {
               </div>
             ) : null}
 
-            <div className="mx-auto max-w-4xl rounded-3xl bg-[#082f63] p-4 text-white">
-              <div className="mb-4 flex flex-col items-center gap-4 pb-4 md:flex-row">
+            <div className="mx-auto max-w-4xl rounded-2xl bg-[#082f63] p-3 text-white sm:p-4 md:rounded-3xl">
+              <div className="mb-4 flex flex-col items-center gap-4 pb-4 sm:flex-row">
                 <div className="group relative">
                   <Image
                     src={currentAvatar}
@@ -365,12 +437,17 @@ export default function ProfilePage() {
                   <button
                     type="button"
                     onClick={openFilePicker}
-                    className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity backdrop-blur-[2px] group-hover:opacity-100"
+                    disabled={isSavingAvatar}
+                    className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity backdrop-blur-[2px] group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-100"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
-                    </svg>
+                    {isSavingAvatar ? (
+                      <span className="text-xs font-semibold tracking-wide text-white">Enregistrement...</span>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                      </svg>
+                    )}
                   </button>
                 </div>
                 <div className="flex-1 space-y-0.5">
@@ -383,21 +460,22 @@ export default function ProfilePage() {
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                disabled={isSavingAvatar}
                 onChange={handleAvatarUpload}
                 className="hidden"
               />
 
-              <div className="mb-6 flex">
+              <div className="mb-4 flex flex-col sm:flex-row md:mb-6">
                 <button
                   onClick={() => setActiveProfileTab("info")}
-                  className={`relative px-6 py-3 font-semibold transition-all ${activeProfileTab === "info" ? "text-white" : "text-white/40 hover:text-white/60"}`}
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all sm:px-6 sm:py-3 sm:text-base ${activeProfileTab === "info" ? "text-white" : "text-white/40 hover:text-white/60"}`}
                 >
                   Informations personnelles
                   {activeProfileTab === "info" ? <span className="absolute bottom-0 left-0 h-[2px] w-full rounded-full bg-blue-500" /> : null}
                 </button>
                 <button
                   onClick={() => setActiveProfileTab("security")}
-                  className={`relative px-6 py-3 font-semibold transition-all ${activeProfileTab === "security" ? "text-white" : "text-white/40 hover:text-white/60"}`}
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all sm:px-6 sm:py-3 sm:text-base ${activeProfileTab === "security" ? "text-white" : "text-white/40 hover:text-white/60"}`}
                 >
                   Securite & Mot de passe
                   {activeProfileTab === "security" ? <span className="absolute bottom-0 left-0 h-[2px] w-full rounded-full bg-blue-500" /> : null}
@@ -621,11 +699,62 @@ function EyeIcon({ crossed }: { crossed: boolean }) {
   );
 }
 
-function toBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Impossible de lire le fichier image."));
-    reader.readAsDataURL(file);
+async function toCompressedDataUrl(file: File) {
+  const image = await loadImage(file);
+  const maxDimension = 1200;
+  const maxBytes = 2_600_000;
+  const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Impossible de preparer l'image pour l'envoi.");
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+
+  const mimeType = file.type === "image/png" ? "image/png" : "image/jpeg";
+  let quality = mimeType === "image/png" ? undefined : 0.86;
+  let dataUrl = canvas.toDataURL(mimeType, quality);
+
+  while (estimateDataUrlBytes(dataUrl) > maxBytes && quality && quality > 0.45) {
+    quality = Number((quality - 0.08).toFixed(2));
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+  }
+
+  if (estimateDataUrlBytes(dataUrl) > maxBytes) {
+    throw new Error("L'image reste trop lourde apres compression. Choisissez une image plus legere.");
+  }
+
+  return dataUrl;
+}
+
+function loadImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new window.Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Impossible de lire le fichier image."));
+    };
+
+    image.src = objectUrl;
   });
+}
+
+function estimateDataUrlBytes(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
 }

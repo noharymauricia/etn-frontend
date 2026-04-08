@@ -24,8 +24,10 @@ function clearAuthSession() {
   document.cookie = `${AUTH_ROLE_KEY}=; path=/; max-age=0; SameSite=Lax`;
 }
 
+const isProd = process.env.NODE_ENV === "production";
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000/api",
+  baseURL: process.env.NEXT_PUBLIC_API_URL ?? (isProd ? "https://drse.bambaray.mg/backend/public/api/" : "http://127.0.0.1:8000/api"),
   headers: {
     Accept: "application/json",
     "Content-Type": "application/json",
@@ -43,11 +45,14 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+export const UNAUTHORIZED_EVENT = "etn:unauthorized";
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401 && typeof window !== "undefined") {
       clearAuthSession();
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
 
     return Promise.reject(error);
@@ -55,3 +60,4 @@ api.interceptors.response.use(
 );
 
 export default api;
+

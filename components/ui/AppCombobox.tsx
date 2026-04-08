@@ -8,6 +8,7 @@ import styles from "@/components/ui/AppCombobox.module.css";
 export type AppComboboxOption = {
   label: string;
   value: string;
+  description?: string;
 };
 
 type AppComboboxProps = {
@@ -43,9 +44,6 @@ export default function AppCombobox({
             className={styles.input}
           />
           <div className={styles.actions}>
-            <Combobox.Clear className={styles.iconButton} aria-label="Effacer">
-              <ClearIcon className={styles.icon} />
-            </Combobox.Clear>
             <Combobox.Trigger className={styles.iconButton} aria-label="Ouvrir la liste">
               <ChevronDownIcon className={styles.icon} />
             </Combobox.Trigger>
@@ -63,7 +61,12 @@ export default function AppCombobox({
                   <Combobox.ItemIndicator className={styles.indicator}>
                     <CheckIcon className={styles.icon} />
                   </Combobox.ItemIndicator>
-                  <div className={styles.itemText}>{item.label}</div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemLabel}>{item.label}</div>
+                    {item.description && (
+                      <div className={styles.itemDescription}>{item.description}</div>
+                    )}
+                  </div>
                 </Combobox.Item>
               )}
             </Combobox.List>

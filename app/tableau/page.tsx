@@ -11,8 +11,44 @@ import AppScrollArea from "@/components/ui/AppScrollArea";
 import Button from "@/components/ui/Button";
 import { toast } from "@/components/ui/Toasts";
 import { activiteService, type Activite } from "@/services/activiter.services";
-import { authService, clearAuthSession, getStoredToken, persistAuthSession } from "@/services/auth.services";
+import {
+  authService,
+  clearAuthSession,
+  getStoredProfile,
+  getStoredToken,
+  persistAuthSession,
+} from "@/services/auth.services";
 import { utilisateurService, type Utilisateur } from "@/services/utilisateur.services";
+
+const ACTIVITIES_CACHE_KEY = "etn_dashboard_activities";
+
+function getCachedActivities() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const rawActivities = localStorage.getItem(ACTIVITIES_CACHE_KEY);
+
+  if (!rawActivities) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawActivities) as Activite[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    localStorage.removeItem(ACTIVITIES_CACHE_KEY);
+    return [];
+  }
+}
+
+function persistActivitiesCache(activities: Activite[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  localStorage.setItem(ACTIVITIES_CACHE_KEY, JSON.stringify(activities));
+}
 
 function getDisplayRole(role?: string) {
   if (!role) {
@@ -54,16 +90,20 @@ function formatDisplayDate(value?: string | null) {
 export default function TableauPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<Utilisateur | null>(null);
+  const [mounted, setMounted] = useState(false);
+  
   const canManageActivities = Boolean(currentUser);
-  const [activities, setActivities] = useState<Activite[]>([]);
+  const [activities, setActivities] = useState<Activite[]>(() => getCachedActivities());
+  const [isActivitiesLoading, setIsActivitiesLoading] = useState(() => getCachedActivities().length === 0);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedActivityId, setSelectedActivityId] = useState<number | null>(null);
   const [participants, setParticipants] = useState<string[]>([]);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [participantPickerValue, setParticipantPickerValue] = useState("");
   const [activityForm, setActivityForm] = useState({
     name: "",
-    status: "Planifiee",
+    status: "",
     responsable: "",
     responsableId: "",
     comments: "",
@@ -80,19 +120,39 @@ export default function TableauPage() {
     setCurrentUser(profil);
   };
 
-  const loadActivities = async (showErrorToast = true) => {
-    try {
-      const activites = await activiteService.getAll();
-      setActivities(activites);
-    } catch (error) {
-      if (showErrorToast) {
-        toast.error(activiteService.getErrorMessage(error, "Impossible de charger les activites."));
-      }
-    }
-  };
-
   useEffect(() => {
-    let isMounted = true;
+    let isEffectMounted = true;
+
+    const loadActivities = async (showErrorToast = true) => {
+      const token = getStoredToken();
+
+      if (!token) {
+        if (isEffectMounted) {
+          clearAuthSession();
+          router.replace("/");
+        }
+        return;
+      }
+
+      try {
+        const initialActivities = await activiteService.getAll();
+
+        if (!isEffectMounted) {
+          return;
+        }
+
+        setActivities(initialActivities);
+        persistActivitiesCache(initialActivities);
+      } catch (error) {
+        if (isEffectMounted && showErrorToast) {
+          toast.error(activiteService.getErrorMessage(error, "Impossible de charger les activites."));
+        }
+      } finally {
+        if (isEffectMounted) {
+          setIsActivitiesLoading(false);
+        }
+      }
+    };
 
     const validateSession = async () => {
       const token = getStoredToken();
@@ -105,56 +165,75 @@ export default function TableauPage() {
 
       try {
         const profil = await authService.me();
-        persistAuthSession({ token, profil });
-        const fullProfil = await utilisateurService.getById(profil.id);
 
-        if (!isMounted) {
+        if (!isEffectMounted) {
           return;
         }
 
-        applyUserToView(fullProfil);
-        await loadActivities();
+        persistAuthSession({ token, profil });
+        applyUserToView(profil as Utilisateur);
+        void loadActivities();
       } catch {
-        clearAuthSession();
-        router.replace("/");
+        if (isEffectMounted) {
+          clearAuthSession();
+          router.replace("/");
+        }
       }
     };
 
-    void validateSession();
+    const initializeSession = async () => {
+      setMounted(true);
+      const profile = getStoredProfile();
+      if (profile) {
+        setCurrentUser(profile as Utilisateur);
+      }
+      void validateSession();
+    };
+
+    void initializeSession();
 
     return () => {
-      isMounted = false;
+      isEffectMounted = false;
     };
   }, [router]);
 
   useEffect(() => {
-    if (!currentUser?.id) {
-      return;
-    }
+    let isPollingActive = true;
 
     const intervalId = window.setInterval(async () => {
-      try {
-        const [refreshedUser, refreshedActivities] = await Promise.all([
-          utilisateurService.getById(currentUser.id),
-          activiteService.getAll(),
-        ]);
-
-        applyUserToView(refreshedUser);
-        setActivities(refreshedActivities);
-
-        const token = getStoredToken();
-        if (token) {
-          persistAuthSession({ token, profil: refreshedUser });
-        }
-      } catch {
-        // Ignore temporary refresh issues and keep the current view.
+      if (document.visibilityState !== "visible" || !isPollingActive) {
+        return;
       }
-    }, 5000);
+
+      const token = getStoredToken();
+
+      if (!token) {
+        isPollingActive = false;
+        clearAuthSession();
+        router.replace("/");
+        return;
+      }
+
+      try {
+        const refreshedActivities = await activiteService.getAll();
+
+        if (!isPollingActive) {
+          return;
+        }
+
+        setActivities(refreshedActivities);
+        persistActivitiesCache(refreshedActivities);
+      } catch {
+        // Ignore temporary refresh issues
+      }
+    }, 15000);
+
 
     return () => {
+      isPollingActive = false;
       window.clearInterval(intervalId);
     };
-  }, [currentUser?.id]);
+  }, [router]);
 
   const availableUsers = useMemo(
     () => Array.from(new Set(activities.flatMap((activity) => activity.participants ?? []))),
@@ -258,6 +337,11 @@ export default function TableauPage() {
     setIsModalOpen(false);
   };
 
+  const resetParticipantPicker = () => {
+    setShowAddParticipant(false);
+    setParticipantPickerValue("");
+  };
+
   const handleAddParticipant = (name: string) => {
     if (!canManageActivities) {
       toast.warning("Vous devez etre connecte pour modifier cette activite.");
@@ -348,12 +432,238 @@ export default function TableauPage() {
     setConfirmAction({ show: false, type: "participant", index: null });
   };
 
+  const renderActivityModal = () => {
+    const participantOptions = availableUsers
+      .filter((user) => !participants.includes(user))
+      .map((user) => ({ label: user, value: user }));
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/60 p-0 backdrop-blur-sm md:p-4">
+        <div className="relative flex h-full w-full flex-col overflow-hidden border-white/20 bg-[rgb(15,27,45)] text-white shadow-2xl shadow-black/40 animate-in fade-in zoom-in duration-300 md:max-h-[90vh] md:max-w-4xl md:rounded-3xl md:border">
+          <div className="flex items-center justify-between border-b border-white/30 bg-[rgb(15,27,45)] px-6 py-4">
+            <h1 className="text-2xl font-bold tracking-wide">Fiche activite</h1>
+            <button
+              onClick={closeActivityModal}
+              className="text-white/60 transition-colors hover:text-white"
+              aria-label="Fermer"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-8 w-8">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <AppScrollArea className="flex-1 overflow-y-auto" viewportClassName="p-8">
+            <div className="grid gap-6 md:grid-cols-2">
+              <div>
+                <label className="mb-2 block text-sm font-semibold uppercase tracking-wider text-white/90">Nom activite</label>
+                <input
+                  type="text"
+                  value={activityForm.name}
+                  onChange={(event) => setActivityForm((prev) => ({ ...prev, name: event.target.value }))}
+                  disabled={!canManageActivities}
+                  className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 font-medium text-white outline-none transition-all focus:border-white/60 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold uppercase tracking-wider text-white/90">Statut</label>
+                {canManageActivities ? (
+                  <AppCombobox
+                    value={activityForm.status}
+                    options={statusOptions}
+                    placeholder="Choisir un statut"
+                    ariaLabel="Statut"
+                    emptyText="Aucun statut trouve."
+                    onChange={(value) => setActivityForm((prev) => ({ ...prev, status: value }))}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={activityForm.status}
+                    disabled
+                    className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white/70 outline-none disabled:cursor-not-allowed"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold uppercase tracking-wider text-white/90">Responsable</label>
+                {canManageActivities ? (
+                  <AppCombobox
+                    value={activityForm.responsableId}
+                    options={responsableOptions}
+                    placeholder="Choisir un responsable"
+                    ariaLabel="Responsable"
+                    emptyText="Aucun responsable trouve."
+                    onChange={(value) => {
+                      const selectedResponsable = responsableOptions.find((option) => option.value === value);
+                      setActivityForm((prev) => ({
+                        ...prev,
+                        responsableId: value,
+                        responsable: selectedResponsable?.label ?? "",
+                      }));
+                    }}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={activityForm.responsable}
+                    disabled
+                    className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white/70 outline-none disabled:cursor-not-allowed"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold uppercase tracking-wider text-white/90">Participants</label>
+                <div className="rounded-2xl border border-white/25 bg-white/10 p-4 text-white">
+                  <ul className="mb-4 space-y-2">
+                    {participants.length ? (
+                      participants.map((participant, index) => (
+                        <li key={`${participant}-${index}`} className="group/p flex items-center justify-between">
+                          <span className="font-medium">{participant}</span>
+                          {canManageActivities ? (
+                            <button
+                              onClick={() => setConfirmAction({ show: true, type: "participant", index })}
+                              className="text-xs text-red-300 opacity-0 transition-all group-hover/p:opacity-100"
+                            >
+                              Supprimer
+                            </button>
+                          ) : null}
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-sm text-white/60">Aucun participant ajoute.</li>
+                    )}
+                  </ul>
+                  {canManageActivities ? (
+                    !showAddParticipant ? (
+                      <button
+                        onClick={() => setShowAddParticipant(true)}
+                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/30 py-2.5 text-sm font-medium transition-colors hover:bg-white/5"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-4 w-4">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                        </svg>
+                        Ajouter un participant
+                      </button>
+                    ) : (
+                      <div className="animate-in slide-in-from-top flex gap-2 duration-300">
+                        <div className="flex-1">
+                          <AppCombobox
+                            value={participantPickerValue}
+                            options={participantOptions}
+                            placeholder="Selectionner..."
+                            ariaLabel="Ajouter un participant"
+                            emptyText="Aucun participant disponible."
+                            onChange={(value) => {
+                              setParticipantPickerValue(value);
+                              handleAddParticipant(value);
+                            }}
+                          />
+                        </div>
+                        <button
+                          onClick={resetParticipantPicker}
+                          className="px-3 py-2 text-white/60 transition-colors hover:text-white"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-5 w-5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    )
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <label className="mb-2 block text-sm font-semibold text-white/90">Commentaires</label>
+              <textarea
+                value={activityForm.comments}
+                onChange={(event) => setActivityForm((prev) => ({ ...prev, comments: event.target.value }))}
+                disabled={!canManageActivities}
+                className="h-32 w-full resize-none rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/60 focus:border-white/60 disabled:cursor-not-allowed disabled:opacity-60"
+                placeholder="Zone de texte pour mettre des remarques."
+              />
+            </div>
+
+            <div className="mt-6 grid gap-6 text-white/80 md:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold">Debut : {formatDisplayDate(activityForm.startDate)}</label>
+                <input
+                  type="date"
+                  value={activityForm.startDate}
+                  onChange={(event) => setActivityForm((prev) => ({ ...prev, startDate: event.target.value }))}
+                  disabled={!canManageActivities}
+                  className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white outline-none focus:border-white/60 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold">Fin : {formatDisplayDate(activityForm.endDate)}</label>
+                <input
+                  type="date"
+                  value={activityForm.endDate}
+                  onChange={(event) => setActivityForm((prev) => ({ ...prev, endDate: event.target.value }))}
+                  disabled={!canManageActivities}
+                  className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white outline-none focus:border-white/60 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+            </div>
+          </AppScrollArea>
+
+          {canManageActivities ? (
+            <div className="sticky bottom-0 z-20 flex items-center justify-between border-t border-white/30 bg-[rgb(15,27,45)] px-8 py-5">
+              <button
+                onClick={() => setConfirmAction({ show: true, type: "activity", index: selectedActivityId })}
+                className="font-semibold text-red-400 transition-colors hover:text-red-300"
+              >
+                Supprimer
+              </button>
+              <div className="w-full max-w-[200px]">
+                <Button label="Mettre a jour" onClick={handleActivityUpdate} />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <main className="flex min-h-screen flex-col bg-[linear-gradient(90deg,#0f4b86_0%,#1460ab_46%,#1460ab_74%,#1d6ab7_100%)] text-white">
+    <main className="flex h-screen flex-col text-white overflow-hidden">
       <Navbar />
 
-      <div className="flex flex-1">
-        <div className="flex min-h-full w-64 flex-col items-center bg-transparent px-4 py-5 text-white">
+      <div className="flex flex-1 overflow-hidden">
+        {/* Bouton toggle sidebar — mobile/tablette uniquement */}
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#75b82a] text-white shadow-xl transition-all hover:bg-[#68a625] active:scale-95 lg:hidden"
+          aria-label={sidebarOpen ? "Fermer le profil" : "Voir le profil"}
+        >
+          {sidebarOpen ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-6 w-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-6 w-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+            </svg>
+          )}
+        </button>
+
+        {/* Overlay backdrop pour sidebar mobile */}
+        {sidebarOpen ? (
+          <div
+            className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden animate-in fade-in duration-200"
+            onClick={() => setSidebarOpen(false)}
+          />
+        ) : null}
+
+        {/* Sidebar */}
+        <div className={`fixed inset-y-0 left-0 z-30 w-64 transform bg-[#0f4b86]/95 backdrop-blur-md transition-transform duration-300 lg:relative lg:translate-x-0 lg:bg-transparent lg:backdrop-blur-none ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}>
+          <div className="flex min-h-full flex-col items-center px-4 py-5 pt-20 text-white lg:pt-5">
           <div className="mb-6 flex w-full flex-col items-center">
             <div className="mb-5 h-[260px] w-[185px] overflow-hidden rounded-2xl border border-white/15 bg-white/10 shadow-lg">
               <Image
@@ -407,25 +717,26 @@ export default function TableauPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h12" />
             </svg>
           </button>
+          </div>
         </div>
 
-        <AppScrollArea className="flex-1 min-h-0" viewportClassName="px-8 py-6 md:px-10">
+        <AppScrollArea className="flex-1 min-h-0" viewportClassName="px-4 py-4 md:px-8 md:py-6 lg:px-10">
           <div className="animate-in fade-in duration-500">
-            <div className="mb-8 rounded-[2rem] border border-white/10 bg-[#082f63] p-8 backdrop-blur-md">
-              <div className="flex flex-col items-center gap-8 lg:flex-row">
-                <div className="flex min-w-[200px] flex-col justify-center">
+            <div className="mb-6 rounded-2xl border border-white/10 bg-[#082f63] p-4 backdrop-blur-md md:mb-8 md:rounded-[2rem] md:p-8">
+              <div className="flex flex-col items-center gap-6 lg:flex-row lg:gap-8">
+                <div className="flex min-w-[160px] flex-col justify-center text-center lg:min-w-[200px] lg:text-left">
                   <div>
-                    <h1 className="text-3xl font-light tracking-tight text-white/70">Annee</h1>
-                    <h2 className="text-5xl font-bold tracking-tighter text-white">{new Date().getFullYear()}</h2>
+                    <h1 className="text-2xl font-light tracking-tight text-white/70 md:text-3xl">Annee</h1>
+                    <h2 className="text-4xl font-bold tracking-tighter text-white md:text-5xl">{new Date().getFullYear()}</h2>
                   </div>
 
-                  <div className="mt-8">
-                    <span className="text-5xl font-extrabold leading-none text-white">{dashboardTotalActivities}</span>
+                  <div className="mt-6 md:mt-8">
+                    <span className="text-4xl font-extrabold leading-none text-white md:text-5xl">{dashboardTotalActivities}</span>
                     <p className="mt-2 text-xs font-bold uppercase leading-tight tracking-[0.2em] text-white/50">Total des activites</p>
                   </div>
                 </div>
 
-                <div className="flex w-full flex-1 flex-col gap-4 sm:flex-row">
+                <div className="grid w-full flex-1 grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
                   <DashboardCard label="En cours" value={dashboardInProgressCount} href="/activites" />
                   <DashboardCard label="Planifiees" value={dashboardPlannedCount} href="/activites" />
                   <DashboardCard label="Terminees" value={dashboardCompletedCount} href="/activites" highlighted />
@@ -449,7 +760,13 @@ export default function TableauPage() {
                   </tr>
                 </thead>
                 <tbody className="before:block before:h-4 before:content-['']">
-                  {dashboardRecentActivities.length ? (
+                  {isActivitiesLoading ? (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-10 text-center text-white/60">
+                        Chargement des activites...
+                      </td>
+                    </tr>
+                  ) : dashboardRecentActivities.length ? (
                     dashboardRecentActivities.map((activity) => (
                       <tr key={activity.id} className="group transition-colors">
                         <td className="border-b-2 border-white/30 px-6 py-5 font-semibold text-white/90">{activity.nom_activite}</td>
@@ -489,186 +806,7 @@ export default function TableauPage() {
         </AppScrollArea>
       </div>
 
-      {isModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-white/20 bg-[rgb(15,27,45)] text-white shadow-2xl shadow-black/40 animate-in fade-in zoom-in duration-300">
-            <div className="flex items-center justify-between border-b border-white/30 bg-[rgb(15,27,45)] px-6 py-4">
-              <h1 className="text-2xl font-bold tracking-wide">Fiche activite</h1>
-              <button onClick={closeActivityModal} className="text-white/60 transition-colors hover:text-white" aria-label="Fermer">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-8 w-8">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <AppScrollArea className="flex-1 min-h-0" viewportClassName="p-8">
-              <div className="grid gap-6 md:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-semibold uppercase tracking-widest text-white/90">Nom activite</label>
-                  <input
-                    type="text"
-                    value={activityForm.name}
-                    onChange={(event) => setActivityForm((prev) => ({ ...prev, name: event.target.value }))}
-                    disabled={!canManageActivities}
-                    className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 font-medium text-white outline-none transition-all focus:border-white/60 disabled:cursor-not-allowed disabled:opacity-60"
-                  />
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold uppercase tracking-widest text-white/90">Statut</label>
-                  {canManageActivities ? (
-                    <AppCombobox
-                      value={activityForm.status}
-                      options={statusOptions}
-                      placeholder="Choisir un statut"
-                      ariaLabel="Statut"
-                      emptyText="Aucun statut trouve."
-                      onChange={(value) => setActivityForm((prev) => ({ ...prev, status: value }))}
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={activityForm.status}
-                      disabled
-                      className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white/70 outline-none disabled:cursor-not-allowed"
-                    />
-                  )}
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold uppercase tracking-widest text-white/90">Responsable</label>
-                  {canManageActivities ? (
-                    <AppCombobox
-                      value={activityForm.responsableId}
-                      options={responsableOptions}
-                      placeholder="Choisir un responsable"
-                      ariaLabel="Responsable"
-                      emptyText="Aucun responsable trouve."
-                      onChange={(value) => {
-                        const selectedResponsable = responsableOptions.find((option) => option.value === value);
-                        setActivityForm((prev) => ({
-                          ...prev,
-                          responsableId: value,
-                          responsable: selectedResponsable?.label ?? "",
-                        }));
-                      }}
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={activityForm.responsable}
-                      disabled
-                      className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white/70 outline-none disabled:cursor-not-allowed"
-                    />
-                  )}
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold uppercase tracking-widest text-white/90">Participants</label>
-                  <div className="rounded-2xl border border-white/25 bg-white/10 p-4 text-white">
-                    <ul className="mb-4 space-y-2">
-                      {participants.length ? (
-                        participants.map((participant, index) => (
-                          <li key={`${participant}-${index}`} className="group/p flex items-center justify-between">
-                            <span className="font-medium">{participant}</span>
-                            {canManageActivities ? (
-                              <button
-                                onClick={() => setConfirmAction({ show: true, type: "participant", index })}
-                                className="text-xs text-red-300 opacity-0 transition-all group-hover/p:opacity-100 hover:text-red-200"
-                              >
-                                Supprimer
-                              </button>
-                            ) : null}
-                          </li>
-                        ))
-                      ) : (
-                        <li className="text-sm text-white/60">Aucun participant.</li>
-                      )}
-                    </ul>
-                    {canManageActivities && !showAddParticipant ? (
-                      <button
-                        onClick={() => setShowAddParticipant(true)}
-                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/30 py-2.5 text-sm font-medium transition-colors hover:bg-white/5"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-4 w-4">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                        </svg>
-                        Ajouter un participant
-                      </button>
-                    ) : canManageActivities ? (
-                      <div className="animate-in slide-in-from-top flex gap-2 duration-300">
-                        <div className="flex-1">
-                          <AppCombobox
-                            value={participantPickerValue}
-                            options={availableUsers.filter((user) => !participants.includes(user)).map((user) => ({ label: user, value: user }))}
-                            placeholder="Selectionner..."
-                            ariaLabel="Ajouter un participant"
-                            emptyText="Aucun participant disponible."
-                            onChange={(value) => {
-                              setParticipantPickerValue(value);
-                              handleAddParticipant(value);
-                            }}
-                          />
-                        </div>
-                        <button onClick={() => setShowAddParticipant(false)} className="px-3 py-2 text-white/60 transition-colors hover:text-white">
-                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-5 w-5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6">
-                <label className="mb-2 block text-sm font-semibold uppercase tracking-widest text-white/90">Commentaires</label>
-                <textarea
-                  value={activityForm.comments}
-                  onChange={(event) => setActivityForm((prev) => ({ ...prev, comments: event.target.value }))}
-                  disabled={!canManageActivities}
-                  className="h-32 w-full resize-none rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/60 focus:border-white/60 disabled:cursor-not-allowed disabled:opacity-60"
-                  placeholder="Zone de texte pour mettre des remarques"
-                />
-              </div>
-
-              <div className="mt-6 grid gap-6 text-white/80 md:grid-cols-2">
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-semibold">Debut : {formatDisplayDate(activityForm.startDate)}</label>
-                  <input
-                    type="date"
-                    value={activityForm.startDate}
-                    onChange={(event) => setActivityForm((prev) => ({ ...prev, startDate: event.target.value }))}
-                    disabled={!canManageActivities}
-                    className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white outline-none focus:border-white/60 disabled:cursor-not-allowed disabled:opacity-60"
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-semibold">Fin : {formatDisplayDate(activityForm.endDate)}</label>
-                  <input
-                    type="date"
-                    value={activityForm.endDate}
-                    onChange={(event) => setActivityForm((prev) => ({ ...prev, endDate: event.target.value }))}
-                    disabled={!canManageActivities}
-                    className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white outline-none focus:border-white/60 disabled:cursor-not-allowed disabled:opacity-60"
-                  />
-                </div>
-              </div>
-            </AppScrollArea>
-
-            {canManageActivities ? (
-              <div className="flex items-center justify-between border-t border-white/30 bg-[rgb(15,27,45)] px-8 py-5">
-                <button
-                  onClick={() => setConfirmAction({ show: true, type: "activity", index: selectedActivityId })}
-                  className="font-semibold text-red-400 transition-colors hover:text-red-300"
-                >
-                  Supprimer
-                </button>
-                <div className="w-full sm:max-w-[200px]">
-                  <Button label="Mettre a jour" onClick={handleActivityUpdate} />
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      {isModalOpen ? renderActivityModal() : null}
 
       {confirmAction.show ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-300">
@@ -727,10 +865,10 @@ function DashboardCard({
   highlighted?: boolean;
 }) {
   return (
-    <div className={`group relative flex min-h-[180px] flex-1 flex-col justify-between rounded-[2rem] border border-white/10 p-8 transition-all hover:bg-white/10 ${highlighted ? "bg-[#1460ab]/20 shadow-xl shadow-black/10 hover:bg-[#1460ab]/30" : "bg-white/5"}`}>
+    <div className={`group relative flex min-h-[140px] flex-col justify-between rounded-2xl border border-white/10 p-5 transition-all hover:bg-white/10 sm:min-h-[180px] sm:rounded-[2rem] sm:p-8 ${highlighted ? "bg-[#1460ab]/20 shadow-xl shadow-black/10 hover:bg-[#1460ab]/30" : "bg-white/5"}`}>
       <div className="flex flex-1 flex-col items-center justify-center text-center">
-        <span className="text-6xl font-black leading-none text-white">{value}</span>
-        <p className="mt-4 text-lg font-bold uppercase tracking-widest text-white/80">{label}</p>
+        <span className="text-4xl font-black leading-none text-white sm:text-6xl">{value}</span>
+        <p className="mt-2 text-sm font-bold uppercase tracking-widest text-white/80 sm:mt-4 sm:text-lg">{label}</p>
       </div>
       <Link href={href} className="absolute bottom-6 right-6 text-white/30 transition-colors group-hover:text-white">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-5 w-5">

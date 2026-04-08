@@ -149,6 +149,7 @@ const Toast = ({ type, title, onClose }: { type: ToastType; title: string; onClo
 };
 
 export const ToastContainer = () => {
+  const [isMounted, setIsMounted] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const addToast = useCallback((type: ToastType, title: string) => {
@@ -161,6 +162,10 @@ export const ToastContainer = () => {
   }, []);
 
   useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
     const handleEvent = (event: Event) => {
       const { type, title } = (event as CustomEvent).detail;
       addToast(type, title);
@@ -169,6 +174,10 @@ export const ToastContainer = () => {
     window.addEventListener(TOAST_EVENT, handleEvent);
     return () => window.removeEventListener(TOAST_EVENT, handleEvent);
   }, [addToast]);
+
+  if (!isMounted) {
+    return null;
+  }
 
   return (
     <div className="etn-toast-container">

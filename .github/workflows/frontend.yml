@@ -1,0 +1,39 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CI: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build project
+        run: npm run build
+
+      - name: 📂 Sync files via FTP
+        uses: kevinpainchaud/simple-ftp-deploy-action@v1.2.1
+        with:
+          ftp_host: ${{ secrets.FTP_HOST }}
+          ftp_username: ${{ secrets.FTP_USER }}
+          ftp_password: ${{ secrets.FTP_PASSWORD }}
+          local_source_dir: "./out"
+          dist_target_dir: "/"
+          delete: "false"

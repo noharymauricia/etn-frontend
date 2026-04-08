@@ -3,6 +3,7 @@ import api from "@/api/axios";
 export const AUTH_TOKEN_KEY = "etn_auth_token";
 export const AUTH_PROFILE_KEY = "etn_auth_profile";
 export const AUTH_ROLE_KEY = "etn_auth_role";
+export const AUTH_SESSION_EVENT = "etn:auth-session";
 
 export type AuthProfile = {
   id: number;
@@ -55,6 +56,7 @@ export function persistAuthSession(session: LoginResponse) {
 
   setCookie(AUTH_TOKEN_KEY, session.token);
   setCookie(AUTH_ROLE_KEY, session.profil.role);
+  window.dispatchEvent(new CustomEvent(AUTH_SESSION_EVENT));
 }
 
 export function clearAuthSession() {
@@ -68,6 +70,7 @@ export function clearAuthSession() {
 
   clearCookie(AUTH_TOKEN_KEY);
   clearCookie(AUTH_ROLE_KEY);
+  window.dispatchEvent(new CustomEvent(AUTH_SESSION_EVENT));
 }
 
 export function getStoredToken() {
@@ -106,13 +109,14 @@ export function getStoredProfile() {
 }
 
 function getErrorMessage(error: unknown) {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "response" in error &&
-    typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message === "string"
-  ) {
-    return (error as { response: { data: { message: string } } }).response.data.message;
+  const errData = (error as { response?: { data?: { message?: string; error?: string } } }).response?.data;
+
+  if (errData?.error) {
+    return `${errData.message} (Détails: ${errData.error})`;
+  }
+
+  if (typeof errData?.message === "string") {
+    return errData.message;
   }
 
   return "Une erreur est survenue lors de la connexion.";

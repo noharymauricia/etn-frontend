@@ -41,7 +41,8 @@ function formatPhoneInput(value: string | null | undefined) {
 
 function getDisplayRole(role: string | null | undefined) {
   if (!role) return "Utilisateur";
-  return role === "Simple utilisateur" ? "Utilisateur" : role;
+  if (role === "Simple utilisateur") return "Utilisateur";
+  return role;
 }
 
 export default function UsersPage() {
@@ -52,7 +53,7 @@ export default function UsersPage() {
   const [userForm, setUserForm] = useState({
     name: "",
     im: "",
-    role: "Administrateur",
+    role: "",
     function: "",
     phone: "",
   });
@@ -68,6 +69,7 @@ export default function UsersPage() {
   const roleOptions = [
     { label: "Administrateur", value: "Administrateur" },
     { label: "Utilisateur", value: "Simple utilisateur" },
+    { label: "Personnel", value: "Personnel" },
   ];
 
   const isLengthValid = newPassword.length >= 8 && newPassword.length <= 16;
@@ -92,26 +94,12 @@ export default function UsersPage() {
 
   const refreshUsersAfterMutation = () => {
     void loadUsers(false);
-
-    window.setTimeout(() => {
-      void loadUsers(false);
-    }, 500);
-
-    window.setTimeout(() => {
-      void loadUsers(false);
-    }, 1200);
   };
+
+
 
   useEffect(() => {
     void loadUsers();
-
-    const intervalId = window.setInterval(() => {
-      void loadUsers(false);
-    }, 5000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
   }, []);
 
   const filteredUsers = useMemo(() => {
@@ -133,7 +121,7 @@ export default function UsersPage() {
     setUserForm({
       name: "",
       im: "",
-      role: "Administrateur",
+      role: "",
       function: "",
       phone: "",
     });
@@ -190,19 +178,21 @@ export default function UsersPage() {
       return;
     }
 
-    if (!newPassword.trim()) {
-      toast.warning("Definissez un mot de passe pour ce compte.");
-      return;
-    }
+    if (userForm.role !== "Personnel") {
+      if (!newPassword.trim()) {
+        toast.warning("Definissez un mot de passe pour ce compte.");
+        return;
+      }
 
-    if (!isPasswordValid) {
-      toast.error("Le mot de passe ne respecte pas les regles de securite.");
-      return;
-    }
+      if (!isPasswordValid) {
+        toast.error("Le mot de passe ne respecte pas les regles de securite.");
+        return;
+      }
 
-    if (!passwordsMatch) {
-      toast.error("La confirmation du mot de passe ne correspond pas.");
-      return;
+      if (!passwordsMatch) {
+        toast.error("La confirmation du mot de passe ne correspond pas.");
+        return;
+      }
     }
 
     try {
@@ -223,6 +213,7 @@ export default function UsersPage() {
     }
   };
 
+
   return (
     <PageShell>
       <div className="mb-8 flex flex-col items-center justify-between gap-4 md:flex-row">
@@ -232,6 +223,7 @@ export default function UsersPage() {
             placeholder="Rechercher un utilisateur..."
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
+            suppressHydrationWarning
             className="w-full rounded-xl border border-white/25 bg-white/10 px-4 py-3 text-white outline-none transition-all focus:border-white/60 font-medium"
           />
           <div className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40">
@@ -246,8 +238,8 @@ export default function UsersPage() {
         </div>
       </div>
 
-      <div className="mb-6 flex items-center gap-4">
-        <h2 className="whitespace-nowrap text-xl font-bold tracking-tight text-white">LISTE DES UTILISATEURS</h2>
+      <div className="mb-6 flex items-center gap-4 md:mb-8">
+        <h2 className="whitespace-nowrap text-lg font-bold tracking-tight text-white md:text-xl">LISTE DES UTILISATEURS</h2>
         <div className="h-[1px] w-full bg-white/20" />
       </div>
 
@@ -317,10 +309,10 @@ export default function UsersPage() {
       </div>
 
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-white/20 bg-[rgb(15,27,45)] text-white shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="flex items-center justify-between border-b border-white/30 bg-[rgb(15,27,45)] px-6 py-4">
-              <h2 className="text-2xl font-bold tracking-wide">ENREGISTRER UN UTILISATEUR</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-0 backdrop-blur-sm md:p-4">
+          <div className="relative flex h-full w-full flex-col overflow-hidden border-white/20 bg-[rgb(15,27,45)] text-white shadow-2xl animate-in zoom-in-95 duration-300 md:max-h-[90vh] md:max-w-4xl md:rounded-3xl md:border">
+            <div className="flex items-center justify-between border-b border-white/30 bg-[rgb(15,27,45)] px-4 py-3 md:px-6 md:py-4">
+              <h2 className="text-lg font-bold tracking-wide md:text-2xl">ENREGISTRER UN UTILISATEUR</h2>
               <button
                 onClick={() => setIsCreateModalOpen(false)}
                 className="text-white/60 transition-colors hover:text-white"
@@ -330,7 +322,7 @@ export default function UsersPage() {
                 </svg>
               </button>
             </div>
-            <AppScrollArea className="flex-1" viewportClassName="p-8" contentClassName="space-y-6">
+            <AppScrollArea className="flex-1" viewportClassName="p-4 md:p-8" contentClassName="space-y-6">
               <div className="grid gap-6 md:grid-cols-2">
                 <div>
                   <label className="mb-2 block text-sm font-semibold uppercase tracking-wider text-white/90">
@@ -397,100 +389,102 @@ export default function UsersPage() {
                 </div>
               </div>
 
-              <div className="grid gap-6 border-t border-white/10 pt-4 md:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-white/90 flex items-center justify-between">
-                    <span>MOT DE PASSE <span className="text-red-400">*</span></span>
-                    {newPassword && (
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] ${isPasswordValid ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
-                        {isPasswordValid ? "Valide" : "Faible"}
-                      </span>
-                    )}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showNewPassword ? "text" : "password"}
-                      value={newPassword}
-                      onChange={(event) => setNewPassword(event.target.value)}
-                      placeholder="••••••••"
-                      className={`w-full rounded-xl border px-4 py-3 pr-12 text-white outline-none transition-all font-sans ${newPassword ? (isPasswordValid ? "border-green-500/50 bg-green-500/5" : "border-red-500/50 bg-red-500/5") : "border-white/25 bg-white/10"}`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowNewPassword(!showNewPassword)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 transition-colors hover:text-white"
-                    >
-                      {showNewPassword ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-5 w-5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
-                        </svg>
-                      ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-5 w-5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.183.184.557.184 1.144 0 1.701C20.577 17.584 16.641 20.5 12 20.5c-4.638 0-8.573-3.007-9.963-7.183Z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                        </svg>
+              {userForm.role !== "Personnel" && (
+                <div className="grid gap-6 border-t border-white/10 pt-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-white/90 flex items-center justify-between">
+                      <span>MOT DE PASSE <span className="text-red-400">*</span></span>
+                      {newPassword && (
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] ${isPasswordValid ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                          {isPasswordValid ? "Valide" : "Faible"}
+                        </span>
                       )}
-                    </button>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNewPassword ? "text" : "password"}
+                        value={newPassword}
+                        onChange={(event) => setNewPassword(event.target.value)}
+                        placeholder="••••••••"
+                        className={`w-full rounded-xl border px-4 py-3 pr-12 text-white outline-none transition-all font-sans ${newPassword ? (isPasswordValid ? "border-green-500/50 bg-green-500/5" : "border-red-500/50 bg-red-500/5") : "border-white/25 bg-white/10"}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 transition-colors hover:text-white"
+                      >
+                        {showNewPassword ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-5 w-5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+                          </svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-5 w-5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.183.184.557.184 1.144 0 1.701C20.577 17.584 16.641 20.5 12 20.5c-4.638 0-8.573-3.007-9.963-7.183Z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
+                      <div className={`flex items-center gap-2 text-[11px] transition-colors ${isLengthValid ? "text-green-400" : "text-white/30"}`}>
+                        <div className={`h-1.5 w-1.5 rounded-full ${isLengthValid ? "bg-green-400" : "bg-white/20"}`} />
+                        8-16 caracteres
+                      </div>
+                      <div className={`flex items-center gap-2 text-[11px] transition-colors ${hasUpperCase ? "text-green-400" : "text-white/30"}`}>
+                        <div className={`h-1.5 w-1.5 rounded-full ${hasUpperCase ? "bg-green-400" : "bg-white/20"}`} />
+                        Une majuscule
+                      </div>
+                      <div className={`flex items-center gap-2 text-[11px] transition-colors ${hasNumber ? "text-green-400" : "text-white/30"}`}>
+                        <div className={`h-1.5 w-1.5 rounded-full ${hasNumber ? "bg-green-400" : "bg-white/20"}`} />
+                        Un chiffre
+                      </div>
+                      <div className={`flex items-center gap-2 text-[11px] transition-colors ${hasSpecialChar ? "text-green-400" : "text-white/30"}`}>
+                        <div className={`h-1.5 w-1.5 rounded-full ${hasSpecialChar ? "bg-green-400" : "bg-white/20"}`} />
+                        Caractere special
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
-                    <div className={`flex items-center gap-2 text-[11px] transition-colors ${isLengthValid ? "text-green-400" : "text-white/30"}`}>
-                      <div className={`h-1.5 w-1.5 rounded-full ${isLengthValid ? "bg-green-400" : "bg-white/20"}`} />
-                      8-16 caracteres
-                    </div>
-                    <div className={`flex items-center gap-2 text-[11px] transition-colors ${hasUpperCase ? "text-green-400" : "text-white/30"}`}>
-                      <div className={`h-1.5 w-1.5 rounded-full ${hasUpperCase ? "bg-green-400" : "bg-white/20"}`} />
-                      Une majuscule
-                    </div>
-                    <div className={`flex items-center gap-2 text-[11px] transition-colors ${hasNumber ? "text-green-400" : "text-white/30"}`}>
-                      <div className={`h-1.5 w-1.5 rounded-full ${hasNumber ? "bg-green-400" : "bg-white/20"}`} />
-                      Un chiffre
-                    </div>
-                    <div className={`flex items-center gap-2 text-[11px] transition-colors ${hasSpecialChar ? "text-green-400" : "text-white/30"}`}>
-                      <div className={`h-1.5 w-1.5 rounded-full ${hasSpecialChar ? "bg-green-400" : "bg-white/20"}`} />
-                      Caractere special
-                    </div>
-                  </div>
-                </div>
 
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-white/90 flex items-center justify-between">
-                    <span>CONFIRMER LE MOT DE PASSE <span className="text-red-400">*</span></span>
-                    {confirmPassword && (
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] ${passwordsMatch ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
-                        {passwordsMatch ? "Identique" : "Different"}
-                      </span>
-                    )}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showConfirmPassword ? "text" : "password"}
-                      value={confirmPassword}
-                      onChange={(event) => setConfirmPassword(event.target.value)}
-                      placeholder="••••••••"
-                      className={`w-full rounded-xl border px-4 py-3 pr-12 text-white outline-none transition-all font-sans ${confirmPassword ? (passwordsMatch ? "border-green-500/50 bg-green-500/5" : "border-red-500/50 bg-red-500/5") : "border-white/25 bg-white/10"}`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 transition-colors hover:text-white"
-                    >
-                      {showConfirmPassword ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-5 w-5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
-                        </svg>
-                      ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-5 w-5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.183.184.557.184 1.144 0 1.701C20.577 17.584 16.641 20.5 12 20.5c-4.638 0-8.573-3.007-9.963-7.183Z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                        </svg>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-white/90 flex items-center justify-between">
+                      <span>CONFIRMER LE MOT DE PASSE <span className="text-red-400">*</span></span>
+                      {confirmPassword && (
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] ${passwordsMatch ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                          {passwordsMatch ? "Identique" : "Different"}
+                        </span>
                       )}
-                    </button>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? "text" : "password"}
+                        value={confirmPassword}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                        placeholder="••••••••"
+                        className={`w-full rounded-xl border px-4 py-3 pr-12 text-white outline-none transition-all font-sans ${confirmPassword ? (passwordsMatch ? "border-green-500/50 bg-green-500/5" : "border-red-500/50 bg-red-500/5") : "border-white/25 bg-white/10"}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 transition-colors hover:text-white"
+                      >
+                        {showConfirmPassword ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-5 w-5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+                          </svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-5 w-5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.183.184.557.184 1.144 0 1.701C20.577 17.584 16.641 20.5 12 20.5c-4.638 0-8.573-3.007-9.963-7.183Z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
             </AppScrollArea>
-            <div className="sticky bottom-0 z-20 flex justify-end border-t border-white/30 bg-[rgb(15,27,45)] px-8 py-5">
+            <div className="sticky bottom-0 z-20 flex justify-end border-t border-white/30 bg-[rgb(15,27,45)] px-4 py-4 md:px-8 md:py-5">
               <div className="w-full max-w-[180px]">
                 <Button label="Enregistrer" onClick={handleSaveUser} />
               </div>

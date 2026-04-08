@@ -1,0 +1,19 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  
+  # Redirect /index.html to /
+  RewriteCond %{THE_REQUEST} ^[A-Z]{3,9}\ /.*index\.html\ HTTP/
+  RewriteRule ^(.*)index\.html$ /$1 [R=301,L]
+
+  # If the request is not a file and not a directory
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  
+  # Try to serve the request as a directory with index.html (Next.js trailingSlash: true)
+  RewriteCond %{DOCUMENT_ROOT}/$1/index.html -f
+  RewriteRule ^(.*)/?$ /$1/index.html [L]
+
+  # Optional: Handle 404 by serving the 404.html from Next.js
+  ErrorDocument 404 /404.html
+</IfModule>

@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 
 import Navbar from "@/components/layout/Navbar";
 import AppScrollArea from "@/components/ui/AppScrollArea";
-import { authService, clearAuthSession, getStoredToken, persistAuthSession } from "@/services/auth.services";
+import { clearAuthSession, getStoredToken } from "@/services/auth.services";
+import { UNAUTHORIZED_EVENT } from "@/api/axios";
 
 type PageShellProps = {
   title?: string;
@@ -22,32 +23,30 @@ export default function PageShell({
   const router = useRouter();
 
   useEffect(() => {
-    const validateSession = async () => {
-      const token = getStoredToken();
+    if (!getStoredToken()) {
+      clearAuthSession();
+      router.replace("/");
+    }
+  }, [router]);
 
-      if (!token) {
-        clearAuthSession();
-        router.replace("/");
-        return;
-      }
-
-      try {
-        const profil = await authService.me();
-        persistAuthSession({ token, profil });
-      } catch {
-        clearAuthSession();
-        router.replace("/");
-      }
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      clearAuthSession();
+      router.replace("/");
     };
 
-    void validateSession();
+    window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+
+    return () => {
+      window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    };
   }, [router]);
 
   return (
-    <main className="flex h-screen flex-col bg-[linear-gradient(90deg,#0f4b86_0%,#1460ab_46%,#1460ab_74%,#1d6ab7_100%)] text-white">
+    <main className="flex h-screen flex-col text-white overflow-hidden">
       <Navbar />
-      <AppScrollArea className="flex-1" viewportClassName="px-6 py-8">
-        <div className={`mx-auto w-full ${maxWidth} p-6 text-white`}>
+      <AppScrollArea className="flex-1" viewportClassName="px-3 py-4 md:px-6 md:py-8">
+        <div className={`mx-auto w-full ${maxWidth} p-2 text-white sm:p-4 md:p-6`}>
           {title ? (
             <div className="mb-6">
               <h1 className="text-3xl font-bold tracking-wide">{title}</h1>

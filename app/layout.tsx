@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
 import "@/styles/globals.css";
-import TopLoader from "@/components/layout/TopLoader";
 import { ToastContainer } from "@/components/ui/Toasts";
+import StyledComponentsRegistry from "@/lib/styled-components-registry";
 
 
 const geistSans = Geist({
@@ -34,12 +34,13 @@ export default function RootLayout({
     >
       <body
         suppressHydrationWarning
-        className="min-h-full flex flex-col bg-[#155faa] text-white"
+        className="min-h-full flex flex-col bg-[linear-gradient(90deg,#0f4b86_0%,#1460ab_46%,#1460ab_74%,#1d6ab7_100%)] bg-fixed text-white"
       >
-        <TopLoader />
-        <ToastContainer />
+        <StyledComponentsRegistry>
+          <ToastContainer />
 
-        {children}
+          {children}
+        </StyledComponentsRegistry>
       </body>
     </html>
   );

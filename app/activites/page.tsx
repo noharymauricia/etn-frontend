@@ -25,12 +25,12 @@ type ActivityFormState = {
   endDate: string;
 };
 
-function createEmptyActivityForm(defaultResponsable?: Utilisateur | null): ActivityFormState {
+function createEmptyActivityForm(): ActivityFormState {
   return {
     name: "",
-    responsable: defaultResponsable?.nom ?? "",
-    responsableId: defaultResponsable ? String(defaultResponsable.id) : "",
-    status: "En cours",
+    responsable: "",
+    responsableId: "",
+    status: "",
     comments: "",
     startDate: "",
     endDate: "",
@@ -84,9 +84,16 @@ function getActivityBadgeClass(status: string) {
   return "text-white";
 }
 
+function getDisplayRole(role: string | null | undefined) {
+  if (!role) return "Utilisateur";
+  if (role === "Simple utilisateur") return "Utilisateur";
+  return role;
+}
+
 export default function ActivitiesPage() {
   const [currentProfileId, setCurrentProfileId] = useState<number | null>(null);
   const [canManageActivities, setCanManageActivities] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [activities, setActivities] = useState<Activite[]>([]);
@@ -124,10 +131,13 @@ export default function ActivitiesPage() {
     { label: "Terminee", value: "Terminee" },
   ];
 
-  const responsableOptions = users.map((user) => ({
-    label: user.nom,
-    value: String(user.id),
-  }));
+  const responsableOptions = useMemo(() => {
+    return users.map((user) => ({
+      label: user.nom,
+      description: getDisplayRole(user.role),
+      value: String(user.id),
+    }));
+  }, [users]);
 
   const availableUsers = users.map((user) => user.nom).filter(Boolean);
 
@@ -158,33 +168,16 @@ export default function ActivitiesPage() {
 
   const refreshActivitiesAfterMutation = () => {
     void loadPageData(false);
-
-    window.setTimeout(() => {
-      void loadPageData(false);
-    }, 500);
-
-    window.setTimeout(() => {
-      void loadPageData(false);
-    }, 1200);
   };
 
   useEffect(() => {
-    const storedProfile = getStoredProfile();
-
-    setCurrentProfileId(storedProfile?.id ?? null);
-    setCanManageActivities(Boolean(storedProfile));
-  }, []);
-
-  useEffect(() => {
+    const profile = getStoredProfile();
+    if (profile) {
+      setCurrentProfileId(profile.id);
+      setCanManageActivities(true);
+    }
+    setMounted(true);
     void loadPageData();
-
-    const intervalId = window.setInterval(() => {
-      void loadPageData(false);
-    }, 5000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
   }, []);
 
   const filteredActivities = useMemo(() => {
@@ -239,6 +232,7 @@ export default function ActivitiesPage() {
     });
   }, [activityForm.responsableId, users]);
 
+
   const resetParticipantPicker = () => {
     setShowAddParticipant(false);
     setParticipantPickerValue("");
@@ -251,7 +245,7 @@ export default function ActivitiesPage() {
     }
 
     setSelectedActivityId(null);
-    setActivityForm(createEmptyActivityForm(defaultResponsable));
+    setActivityForm(createEmptyActivityForm());
     setParticipants([]);
     resetParticipantPicker();
     setIsCreateModalOpen(true);
@@ -411,19 +405,23 @@ export default function ActivitiesPage() {
     }
   };
 
-  const participantOptions = availableUsers
-    .filter((user) => !participants.includes(user))
-    .map((user) => ({ label: user, value: user }));
+  const participantOptions = users
+    .filter((u) => !participants.includes(u.nom) && u.nom !== activityForm.responsable)
+    .map((u) => ({
+      label: u.nom,
+      description: getDisplayRole(u.role),
+      value: u.nom,
+    }));
 
   const renderActivityModal = (mode: "create" | "update") => {
     const isUpdateMode = mode === "update";
     const isReadonly = isUpdateMode && !canManageActivities;
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/60 p-4 backdrop-blur-sm">
-        <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-white/20 bg-[rgb(15,27,45)] text-white shadow-2xl shadow-black/40 animate-in fade-in zoom-in duration-300">
-          <div className="flex items-center justify-between border-b border-white/30 bg-[rgb(15,27,45)] px-6 py-4">
-            <h1 className="text-2xl font-bold tracking-wide">Fiche activite</h1>
+      <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/60 p-0 backdrop-blur-sm md:p-4">
+        <div className="relative flex h-full w-full flex-col overflow-hidden border-white/20 bg-[rgb(15,27,45)] text-white shadow-2xl shadow-black/40 animate-in fade-in zoom-in duration-300 md:max-h-[90vh] md:max-w-4xl md:rounded-3xl md:border">
+          <div className="flex items-center justify-between border-b border-white/30 bg-[rgb(15,27,45)] px-4 py-3 md:px-6 md:py-4">
+            <h1 className="text-lg font-bold tracking-wide md:text-2xl">Fiche activite</h1>
             <button
               onClick={() => {
                 if (isUpdateMode) {
@@ -441,7 +439,7 @@ export default function ActivitiesPage() {
             </button>
           </div>
           
-          <AppScrollArea className="flex-1 overflow-y-auto" viewportClassName="p-8">
+          <AppScrollArea className="flex-1 overflow-y-auto" viewportClassName="p-4 md:p-8">
             <div className="grid gap-6 md:grid-cols-2">
               <div>
                 <label className="mb-2 block text-sm font-semibold uppercase tracking-wider text-white/90">Nom activite</label>
@@ -586,7 +584,7 @@ export default function ActivitiesPage() {
           </AppScrollArea>
            
           {canManageActivities ? (
-            <div className="sticky bottom-0 z-20 flex items-center justify-between border-t border-white/30 bg-[rgb(15,27,45)] px-8 py-5">
+            <div className="sticky bottom-0 z-20 flex items-center justify-between border-t border-white/30 bg-[rgb(15,27,45)] px-4 py-4 md:px-8 md:py-5">
               {isUpdateMode ? (
                 <button
                   onClick={confirmDeleteActivity}
@@ -612,8 +610,8 @@ export default function ActivitiesPage() {
 
   return (
     <PageShell>
-      <div className="mb-8 flex flex-col items-center justify-between gap-4 xl:flex-row">
-        <div className="flex w-full flex-1 flex-col items-center gap-4 md:flex-row">
+      <div className="mb-6 flex flex-col items-stretch justify-between gap-4 md:mb-8 xl:flex-row xl:items-center">
+        <div className="flex w-full flex-1 flex-col items-stretch gap-3 md:flex-row md:items-center md:gap-4">
           <div className="relative w-full md:max-w-xs">
             <input
               type="text"
@@ -629,8 +627,8 @@ export default function ActivitiesPage() {
             </div>
           </div>
 
-          <div className="flex w-full items-center gap-3 md:w-auto">
-            <div className="flex flex-1 items-center gap-2 md:flex-none">
+          <div className="flex w-full flex-col items-stretch gap-3 sm:flex-row sm:items-center md:w-auto">
+            <div className="flex flex-1 items-center gap-2 sm:flex-none">
               <label className="whitespace-nowrap text-xs font-bold uppercase tracking-widest text-white/60">Debut</label>
               <input
                 type="date"
@@ -639,7 +637,7 @@ export default function ActivitiesPage() {
                 className="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2.5 text-sm font-medium text-white outline-none transition-all focus:border-white/60 md:w-40"
               />
             </div>
-            <div className="flex flex-1 items-center gap-2 md:flex-none">
+            <div className="flex flex-1 items-center gap-2 sm:flex-none">
               <label className="whitespace-nowrap text-xs font-bold uppercase tracking-widest text-white/60">Fin</label>
               <input
                 type="date"
@@ -652,14 +650,14 @@ export default function ActivitiesPage() {
         </div>
 
         {canManageActivities ? (
-          <div className="w-full max-w-[220px]">
+          <div className="w-full sm:max-w-[220px]">
             <Button label="Creer une activite" onClick={openCreateModal} />
           </div>
         ) : null}
       </div>
 
-      <div className="mb-6 flex items-center gap-4">
-        <h2 className="whitespace-nowrap text-xl font-bold tracking-tight text-white">LISTE DES ACTIVITES</h2>
+      <div className="mb-4 flex items-center gap-4 md:mb-6">
+        <h2 className="whitespace-nowrap text-lg font-bold tracking-tight text-white md:text-xl">LISTE DES ACTIVITES</h2>
         <div className="h-[1px] w-full bg-white/20" />
       </div>
 

@@ -128,5 +128,20 @@
 
 .itemText {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.itemLabel {
   font-size: 0.95rem;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+.itemDescription {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 400;
 }
